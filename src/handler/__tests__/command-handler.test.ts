@@ -330,13 +330,13 @@ describe("createCommandHandler", () => {
       mockFeishuClient.replyMessage = vi.fn().mockResolvedValue({ code: 0, msg: "ok" })
 
       const handler = createHandler()
-      const result = await handler("chat-1", "chat-1", "msg-1", "/models openai/gpt-5")
+      const result = await handler("chat-1", "chat-1", "msg-1", "/models openai/gpt-5", "feishu")
 
       expect(result).toBe(true)
       expect(mockSessionManager.setModel).toHaveBeenCalledWith("chat-1", "openai/gpt-5")
       expect(mockFeishuClient.replyMessage).toHaveBeenCalledWith("msg-1", {
         msg_type: "text",
-        content: expect.stringContaining("Model switched to"),
+        content: expect.stringContaining("已切换模型"),
       })
     })
   })

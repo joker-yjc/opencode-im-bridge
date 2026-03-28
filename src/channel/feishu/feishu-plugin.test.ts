@@ -12,6 +12,10 @@ import type { Logger } from "../../utils/logger.js"
 import { createMockLogger, createMockFeishuClient } from "../../__tests__/setup.js"
 import type { FeishuMessageEvent } from "../../types.js"
 
+vi.mock("node:fs/promises", () => ({
+  readFile: vi.fn().mockResolvedValue(Buffer.from("fake-image-data")),
+}))
+
 // ── Helpers ──
 
 function makeConfig(): AppConfig {
@@ -200,10 +204,6 @@ describe("FeishuPlugin", () => {
     })
 
     it("sendImage uploads and sends image to target", async () => {
-      // Mock fs.readFile to avoid real filesystem dependency
-      const originalReadFile = await import("node:fs/promises")
-      vi.spyOn(originalReadFile, "readFile").mockResolvedValue(Buffer.from("fake-image-data"))
-
       const feishuClient = createMockFeishuClient()
       const logger = createMockLogger()
       const p = makeFeishuPlugin({ feishuClient, logger })

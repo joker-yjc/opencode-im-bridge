@@ -17,7 +17,7 @@ import type { StreamingBridge } from "./streaming-integration.js"
 import type { SessionObserver } from "../streaming/session-observer.js"
 import type { EventListenerMap } from "../utils/event-listeners.js"
 import { addListener, removeListener } from "../utils/event-listeners.js"
-import type { CommandHandler, CommandHandlerEx } from "./command-handler.js"
+import type { CommandHandlerEx } from "./command-handler.js"
 import type { OutboundMediaHandler } from "./outbound-media.js"
 import { MessageDebouncer, type BufferedMessage, type BatchContext } from "./message-debounce.js"
 import { getAttachmentsDir } from "../utils/paths.js"
@@ -372,7 +372,15 @@ export function createMessageHandler(
 
     const feishuSupportedTypes = ["text", "post", "image", "file"]
     const qqSupportedTypes = ["text", "image", "file"]
-    const supportedTypes = channelId === "qq" ? qqSupportedTypes : feishuSupportedTypes
+    const wechatSupportedTypes = ["text", "image", "file", "voice", "video"]
+    let supportedTypes: string[]
+    if (channelId === "qq") {
+      supportedTypes = qqSupportedTypes
+    } else if (channelId === "wechat") {
+      supportedTypes = wechatSupportedTypes
+    } else {
+      supportedTypes = feishuSupportedTypes
+    }
 
     if (!supportedTypes.includes(messageType)) {
       logger.info(
@@ -392,7 +400,13 @@ export function createMessageHandler(
             event.message_id,
             logger,
           )
+        } else if (channelId === "wechat") {
+          // 微信：使用已提取的文本内容（包含媒体类型和文件信息）
+          // 微信的图片/文件消息已经在 normalizeInbound 中提取了文本
+          const parsed = JSON.parse(event.message.content)
+          userText = parsed.text || ""
         } else {
+          // 飞书
           userText = await handleFileOrImageMessage(
             event.message.message_type as "image" | "file",
             event.message.content,
@@ -416,6 +430,14 @@ export function createMessageHandler(
           const errMsg = err instanceof Error ? err.message : String(err)
           userText = `User sent a ${messageType} but download failed: ${errMsg}. Message ID: ${event.message_id}`
         }
+      }
+    } else if (messageType === "voice" || messageType === "video") {
+      // 微信语音/视频消息处理
+      try {
+        const parsed = JSON.parse(event.message.content)
+        userText = parsed.text || ""
+      } catch {
+        userText = event.message.content || ""
       }
     } else if (messageType === "post") {
       userText = extractTextFromPost(event.message.content)
@@ -717,6 +739,7 @@ export function createMessageHandler(
         logger.info(`Response sent for session ${sessionId} (streaming bridge)`)
         return
       } catch (err) {
+        logger.error(`StreamingBridge failed for session ${sessionId}: ${err}`)
         if (err instanceof SessionGoneError) {
           // 404 self-healing: clear stale mapping, get new session, retry once
           logger.warn(`Session ${sessionId} returned 404 in streaming path — clearing stale mapping and retrying`)

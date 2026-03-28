@@ -69,6 +69,7 @@ export async function login(
   onStatus("开始微信扫码登录...")
 
   const qrResp = await getQrcode(baseUrl)
+  log.info(`[DEBUG] getQrcode 响应: qrcode=${qrResp.qrcode?.substring(0, 8)}..., qrcode_img_content 长度=${qrResp.qrcode_img_content?.length ?? 0}`)
 
   const dataDir = getDefaultDataDir()
   if (!fs.existsSync(dataDir)) {

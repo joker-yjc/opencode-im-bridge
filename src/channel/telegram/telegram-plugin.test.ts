@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { TelegramPlugin, mdToMarkdownV2, createTelegramInlineCard } from "./telegram-plugin.js"
 import { createMockLogger } from "../../__tests__/setup.js"
 
+vi.mock("node:fs/promises", () => ({
+  readFile: vi.fn().mockResolvedValue(new Uint8Array([0x50, 0x4b, 0x03, 0x04])),
+}))
+
 function createPlugin(overrides: Partial<ConstructorParameters<typeof TelegramPlugin>[0]> = {}) {
   return new TelegramPlugin({
     appConfig: {
@@ -174,9 +178,6 @@ describe("TelegramPlugin", () => {
     mockFetch.mockResolvedValue({
       json: () => Promise.resolve({ ok: true, result: { message_id: 1 } }),
     })
-
-    const mockReadFile = vi.fn().mockResolvedValue(new Uint8Array([0x50, 0x4b, 0x03, 0x04]))
-    vi.spyOn(await import("node:fs/promises"), "readFile").mockImplementation(mockReadFile)
 
     await plugin.outbound.sendFile!({ address: "42" }, "F:/test/document.pdf")
 

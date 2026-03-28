@@ -197,3 +197,30 @@ export interface MediaInfo {
   aes_key: string
   encrypt_type: number
 }
+
+// ── Typing Status Types ──
+export interface GetConfigRequest {
+  type: number
+  to_user_id: string
+  base_info: { channel_version: string }
+}
+
+export interface GetConfigResponse {
+  ret: number
+  errcode?: number
+  errmsg?: string
+  typing_ticket?: string
+}
+
+export interface SendTypingRequest {
+  ilink_user_id: string
+  typing_ticket: string
+  status: number
+  base_info: { channel_version: string }
+}
+
+export interface SendTypingResponse {
+  ret: number
+  errcode?: number
+  errmsg?: string
+}

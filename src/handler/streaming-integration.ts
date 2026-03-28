@@ -139,21 +139,30 @@ export function createStreamingBridge(
         let typingInterval: ReturnType<typeof setInterval> | null = null
 
         const startTyping = (): void => {
-          if (channelId !== "telegram" || typingInterval) return
-          const sendTypingAction = async (): Promise<void> => {
-            try {
-              const cfg = plugin?.config?.resolveAccount?.()
-              const token = cfg?.botToken
-              if (!token) return
-              await fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ chat_id: chatId, action: "typing" }),
-              })
-            } catch {}
+          if (typingInterval) return // 防止重复启动
+
+          if (channelId === "telegram") {
+            const sendTypingAction = async (): Promise<void> => {
+              try {
+                const cfg = plugin?.config?.resolveAccount?.()
+                const token = cfg?.botToken
+                if (!token) return
+                await fetch(`https://api.telegram.org/bot${token}/sendChatAction`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ chat_id: chatId, action: "typing" }),
+                })
+              } catch {}
+            }
+            void sendTypingAction()
+            typingInterval = setInterval(() => void sendTypingAction(), 4000)
+          } else if (channelId === "wechat" && plugin?.outbound?.sendTyping) {
+            // WeChat: 发送"正在输入"状态
+            logger.info(`[StreamingBridge] Calling WeChat sendTyping for ${chatId}`)
+            plugin.outbound.sendTyping({ address: chatId }).catch((err: unknown) => {
+              logger.error(`[StreamingBridge] WeChat sendTyping failed: ${err}`)
+            })
           }
-          void sendTypingAction()
-          typingInterval = setInterval(() => void sendTypingAction(), 4000)
         }
 
         const stopTyping = (): void => {
@@ -165,16 +174,13 @@ export function createStreamingBridge(
 
         // Helper: send text reply and clean up reaction
         const sendFinalResponse = async (text: string, skipMessage = false): Promise<void> => {
-          logger.info(`[StreamingBridge] sendFinalResponse called: text.length=${text.length}, skipMessage=${skipMessage}, streamSession.close exists=${!!streamSession?.close}, channelId=${channelId}`)
+          logger.info(`[StreamingBridge] sendFinalResponse called: text.length=${text.length}, skipMessage=${skipMessage}`)
           if (streamSession?.close) {
-            logger.info(`[StreamingBridge] Calling streamSession.close(), setting skipMessage=true`)
             await streamSession.close(text)
             skipMessage = true
           }
           if (!skipMessage) {
-            logger.info(`[StreamingBridge] skipMessage=false, checking plugin.outbound: plugin=${!!plugin}, outbound=${!!plugin?.outbound}, sendText=${!!plugin?.outbound?.sendText}`)
             if (plugin?.outbound?.sendText) {
-              logger.info(`[StreamingBridge] Sending final response via plugin ${channelId} to ${chatId}`)
               await plugin.outbound.sendText({ address: chatId }, text)
               logger.info(`[StreamingBridge] Final response sent via plugin ${channelId}`)
             } else if (feishuClient) {
@@ -311,12 +317,16 @@ export function createStreamingBridge(
             }
 
             case "SessionIdle": {
-              if (settled) return
+              logger.info(`[StreamingBridge] SessionIdle event received: sessionId=${sessionId}, settled=${settled}, textBuffer.length=${textBuffer.length}`)
+              if (settled) {
+                return
+              }
               settled = true
               stopTyping()
               clearTimeout(firstEventTimer)
               removeListener(eventListeners, sessionId, myListener)
               const responseText = textBuffer.trim() || "（无回复）"
+              logger.info(`[StreamingBridge] SessionIdle: responseText="${responseText.substring(0, 100)}..."`)
               const closeCard = card
                 ? (cardStartPromise ?? Promise.resolve()).then(() => card!.close(responseText))
                 : Promise.resolve()
@@ -389,6 +399,15 @@ export function createStreamingBridge(
             logger.info(
               `POST completed for session ${sessionId} (${responseBody.length} bytes)`,
             )
+            // 如果没有流式事件，直接发送同步响应
+            if (!gotFirstEvent && !textBuffer.length) {
+              // 发送 typing 状态
+              startTyping()
+              const finalText = parseSyncResponse(responseBody, logger)
+              sendFinalResponse(finalText, false).catch((err) => {
+                logger.error(`Failed to send sync response: ${err}`)
+              })
+            }
           })
           .catch((err) => {
             if (settled) return

@@ -11,7 +11,7 @@
  */
 
 import { stat, realpath, readdir } from "node:fs/promises"
-import { resolve, join } from "node:path"
+import { resolve, join, basename } from "node:path"
 import { homedir } from "node:os"
 import type { ChannelOutboundAdapter, OutboundTarget } from "../channel/types.js"
 import type { Logger } from "../utils/logger.js"
@@ -31,12 +31,12 @@ export interface OutboundMediaHandler {
 
 // ── Constants ──
 
-export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|webp)$/i
 const AUDIO_EXTENSIONS = /\.(opus|mp3|wav|m4a|ogg|flac)$/i
 const VIDEO_EXTENSIONS = /\.(mp4|mov|avi|webm|mkv)$/i
-const FILE_EXTENSIONS = /\.(pdf|doc|docx|ppt|pptx|rtf|odt|ods|odp|xls|xlsx|csv|zip|tar|gz|txt|md|json|yaml|yml|html|css|js|ts|py|svg)$/i
+const FILE_EXTENSIONS = /\.(pdf|doc|docx|ppt|pptx|rtf|odt|ods|odp|xls|xlsx|csv|zip|tar|gz|txt|md|json|yaml|yml|html|css|js|ts|py|sh|svg)$/i
 
 // ── Path extraction ──
 
@@ -51,7 +51,7 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, "/")
 }
 
-const EXT_REGEX = /\.(png|jpg|jpeg|gif|webp|pdf|svg|doc|docx|ppt|pptx|rtf|odt|ods|odp|xls|xlsx|csv|zip|tar|gz|mp3|mp4|wav|mov|avi|txt|md|json|yaml|yml|html|css|js|ts|py)$/i
+const EXT_REGEX = /\.(png|jpg|jpeg|gif|webp|pdf|svg|doc|docx|ppt|pptx|rtf|odt|ods|odp|xls|xlsx|csv|zip|tar|gz|mp3|mp4|wav|mov|avi|txt|md|json|yaml|yml|html|css|js|ts|py|sh)$/i
 
 // Control chars + Windows illegal chars except slashes (slashes are path separators)
 const WIN_PATH_REGEX = /([A-Za-z]:[/\\][^\x00-\x1f<>:"\|?*]+)/g
@@ -175,18 +175,29 @@ export function createOutboundMediaHandler(
 
   async function scanNewFiles(target: OutboundTarget, adapter: ChannelOutboundAdapter): Promise<void> {
     const snapshot = dirSnapshots.get(target.address)
-    if (!snapshot) return
+    if (!snapshot) {
+      logger.warn(`[OutboundMedia] No snapshot found for target: ${target.address}`)
+      return
+    }
+
+    logger.info(`[OutboundMedia] Scanning for new files, snapshot has ${snapshot.size} files: ${Array.from(snapshot).join(", ")}`)
+    logger.info(`[OutboundMedia] Allowlist directories: ${allowlist.join(", ")}`)
 
     for (const dir of allowlist) {
       let entries: string[]
       try {
         entries = await readdir(dir)
-      } catch {
+        logger.info(`[OutboundMedia] Directory ${dir} has ${entries.length} entries: ${entries.join(", ")}`)
+      } catch (err) {
+        logger.warn(`[OutboundMedia] Failed to read directory ${dir}: ${err}`)
         continue
       }
 
       for (const fileName of entries) {
-        if (snapshot.has(fileName)) continue
+        if (snapshot.has(fileName)) {
+          logger.info(`[OutboundMedia] File ${fileName} already in snapshot, skipping`)
+          continue
+        }
         logger.info(`[OutboundMedia] New file detected: ${fileName} (not in snapshot)`)
         const filePath = join(dir, fileName)
         const type = classifyFile(fileName)
@@ -203,16 +214,18 @@ export function createOutboundMediaHandler(
   return {
     async snapshotAttachments(targetAddress: string): Promise<void> {
       const snapshot = new Set<string>()
+      logger.info(`[OutboundMedia] Taking snapshot for target: ${targetAddress}`)
       for (const dir of allowlist) {
         try {
           const entries = await readdir(dir)
+          logger.info(`[OutboundMedia] Directory ${dir} has ${entries.length} files: ${entries.join(", ")}`)
           for (const f of entries) snapshot.add(f)
-        } catch {
-          // Directory may not exist yet
+        } catch (err) {
+          logger.warn(`[OutboundMedia] Failed to read directory ${dir} for snapshot: ${err}`)
         }
       }
       dirSnapshots.set(targetAddress, snapshot)
-      logger.debug(`Attachments snapshot taken for ${targetAddress}: ${snapshot.size} files`)
+      logger.info(`[OutboundMedia] Snapshot taken for ${targetAddress}: ${snapshot.size} files: ${Array.from(snapshot).join(", ")}`)
     },
 
     async sendDetectedFiles(target: OutboundTarget, text: string, outboundAdapter?: ChannelOutboundAdapter): Promise<void> {
@@ -269,8 +282,16 @@ async function processFile(
     if (!realPath) return
 
     const fileStat = await stat(realPath)
+    const fileName = basename(realPath)
     if (fileStat.size > MAX_UPLOAD_BYTES) {
-      logger.warn(`Skipping ${realPath}: exceeds ${MAX_UPLOAD_BYTES / 1024 / 1024}MB size limit`)
+      const sizeMB = (fileStat.size / 1024 / 1024).toFixed(1)
+      const limitMB = MAX_UPLOAD_BYTES / 1024 / 1024
+      logger.warn(`Skipping ${realPath}: exceeds ${limitMB}MB size limit`)
+      // 告知用户文件太大
+      if (adapter.sendText) {
+        const msg = `文件 "${fileName}" 大小为 ${sizeMB}MB，超过 ${limitMB}MB 限制，无法发送`
+        await adapter.sendText(target, msg)
+      }
       return
     }
 

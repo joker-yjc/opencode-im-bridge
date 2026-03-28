@@ -36,6 +36,12 @@ Create a `.env` file in the project root (refer to `.env.example`).
 |---|---|---|
 | `DISCORD_BOT_TOKEN` | Yes* | Bot Token from Discord Developer Portal |
 
+### WeChat
+| Variable | Required | Description |
+|---|---|---|
+| `WECHAT_ENABLED` | Yes* | Set to `true` to enable WeChat |
+| `WECHAT_SESSION_FILE` | No | WeChat session file path, default `.opencode-lark/wechat-session.json` |
+
 > \* At least one channel must be configured.
 
 ---

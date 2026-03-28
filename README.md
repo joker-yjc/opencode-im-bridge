@@ -13,7 +13,7 @@
 ## 功能特性
 
 - **实时桥接** — 飞书消息即时出现在 opencode TUI，agent 回复以动态卡片形式推送回飞书。支持 **Markdown 格式渲染**（标题、列表、代码块等）。
-- **多渠道支持** — 现在支持通过官方 Node SDK 桥接 QQ、Telegram、Discord 和微信消息。微信使用腾讯官方 iLink Bot API，支持扫码登录。
+- **多渠道支持** — 现在支持通过官方 Node SDK 桥接 QQ、Telegram、Discord 和微信消息。微信使用腾讯官方 `@wechatbot/wechatbot` SDK，支持扫码登录。
 - **交互式卡片** — agent 的提问和权限请求以可点击的飞书卡片呈现，直接在聊天中回答或审批，无需切换到 TUI。(目前主要在飞书端支持)
 - **WebSocket 长连接** — 采用飞书 / QQ 的 WebSocket 长连接模式，无需公网 IP，无需轮询。
 - **SSE 流式输出** — 订阅 opencode SSE 事件流，防抖处理卡片更新，避免触发频率限制。
@@ -33,9 +33,9 @@
 | `text` | ✅ | ✅ | ✅ | ✅ | ✅ | 普通文字消息 |
 | `post` | ✅ | ✅ | ❌ | ❌ | ❌ | 富文本 / 多段落消息 |
 | `image` | ✅ | ✅ | ✅ | ✅ | ✅ | 图片和截图 |
-| `file` | ✅ | ✅ | ✅ | ✅ | ⏳ | 文档、代码文件等 |
-| `audio` | ✅ | ✅ | ✅ | ✅ | ⏳ | 语音消息（带文字识别） |
-| `video` | ✅ | ✅ | ✅ | ✅ | ⏳ | 视频消息 |
+| `file` | ✅ | ✅ | ✅ | ✅ | ✅ | 文档、代码文件等 |
+| `audio` | ✅ | ✅ | ✅ | ✅ | ✅ | 语音消息（带文字识别） |
+| `video` | ✅ | ✅ | ✅ | ✅ | ✅ | 视频消息 |
 | `sticker` | ❌ | ❌ | ❌ | ❌ | ❌ | 不支持 |
 
 > **注意**：QQ C2C 文件发送因 QQ 平台限制，文件名会被修改，发送后会自动提示原始文件名。
@@ -52,7 +52,7 @@
 | QQ | WebSocket | App ID + Secret | ✅ | ✅ | ❌ |
 | Telegram | HTTP Bot API | Bot Token | ✅ | ✅ | ❌ |
 | Discord | HTTP Bot API | Bot Token | ✅ | ✅ | ❌ |
-| 微信 | HTTP 长轮询 | 扫码登录 | ✅ | ⏳ | ⏳ |
+| 微信 | HTTP 长轮询 | 扫码登录 | ✅ | ✅ | ❌ |
 
 ### 斜杠命令 (Slash Commands)
 
@@ -231,6 +231,7 @@ opencode attach http://127.0.0.1:4096 --session {session_id}
     "enabled": true,
     "sessionFile": "./data/wechat-session.json"
   },
+  // 提示：首次登录时控制台会打印 QR Code URL，若二维码扫描异常可直接访问该链接完成绑定
   // 默认 opencode agent 名称，需与 opencode 配置中的 agent 匹配。
   // 常见值："build"、"claude"、"code" — 请查看你的 opencode 配置。
   "defaultAgent": "build",

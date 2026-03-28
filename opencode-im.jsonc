@@ -1,0 +1,19 @@
+{
+  // 微信配置
+  "wechat": {
+    "enabled": true,
+    "sessionFile": "./data/wechat-session.json"
+  },
+  
+  // 默认 agent 名称（需要与 opencode 配置中的 agent 匹配）
+  "defaultAgent": "build",
+  
+  // 数据目录
+  "dataDir": "./data",
+  
+  // 进度更新防抖配置
+  "progress": {
+    "debounceMs": 500,
+    "maxDebounceMs": 3000
+  }
+}

@@ -36,6 +36,12 @@
 |---|---|---|
 | `DISCORD_BOT_TOKEN` | 是* | Discord 开发者门户获取的 Bot Token |
 
+### 微信 (WeChat)
+| 变量名 | 必需 | 说明 |
+|---|---|---|
+| `WECHAT_ENABLED` | 是* | 设为 `true` 启用微信 |
+| `WECHAT_SESSION_FILE` | 否 | 微信登录态保存路径，默认 `.opencode-lark/wechat-session.json` |
+
 > \* 至少需要配置一个渠道。
 
 ---

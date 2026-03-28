@@ -10,6 +10,10 @@ import {
   type SendMessageResponse,
   type GetUploadURLRequest,
   type GetUploadURLResponse,
+  type GetConfigRequest,
+  type GetConfigResponse,
+  type SendTypingRequest,
+  type SendTypingResponse,
 } from "./types.js"
 
 function randomWechatUin(): string {
@@ -168,6 +172,42 @@ export async function sendImageMessage(
   return apiPost<SendMessageResponse>(baseUrl, "ilink/bot/sendmessage", request, token)
 }
 
+export async function sendImageMessageWithUploadParam(
+  baseUrl: string,
+  token: string,
+  toUserId: string,
+  clientId: string,
+  contextToken: string,
+  aesKey: string,
+  md5sum: string,
+  uploadParam: string,
+  size: number,
+): Promise<SendMessageResponse> {
+  const request: SendMessageRequest = {
+    msg: {
+      from_user_id: "",
+      to_user_id: toUserId,
+      client_id: clientId,
+      message_type: 2,
+      message_state: 2,
+      context_token: contextToken,
+      item_list: [{
+        type: 2,
+        image_item: {
+          media: {
+            aes_key: aesKey,
+            encrypt_query_param: uploadParam, // 使用 upload_param 作为加密查询参数
+            encrypt_type: 1,
+          },
+          mid_size: size,
+        },
+      }],
+    },
+    base_info: { channel_version: CHANNEL_VERSION },
+  }
+  return apiPost<SendMessageResponse>(baseUrl, "ilink/bot/sendmessage", request, token)
+}
+
 export async function sendFileMessage(
   baseUrl: string,
   token: string,
@@ -176,7 +216,7 @@ export async function sendFileMessage(
   contextToken: string,
   aesKey: string,
   md5sum: string,
-  _encryptedData: Buffer,
+  uploadParam: string,
   size: number,
   fileName: string,
 ): Promise<SendMessageResponse> {
@@ -193,7 +233,7 @@ export async function sendFileMessage(
         file_item: {
           media: {
             aes_key: aesKey,
-            encrypt_query_param: "",
+            encrypt_query_param: uploadParam,
             encrypt_type: 1,
           },
           file_name: fileName,
@@ -214,7 +254,7 @@ export async function sendVideoMessage(
   contextToken: string,
   aesKey: string,
   md5sum: string,
-  _encryptedData: Buffer,
+  uploadParam: string,
   size: number,
 ): Promise<SendMessageResponse> {
   const request: SendMessageRequest = {
@@ -230,7 +270,7 @@ export async function sendVideoMessage(
         video_item: {
           media: {
             aes_key: aesKey,
-            encrypt_query_param: "",
+            encrypt_query_param: uploadParam,
             encrypt_type: 1,
           },
           video_size: size,
@@ -250,17 +290,69 @@ export async function getUploadURL(
   return apiPost<GetUploadURLResponse>(baseUrl, "ilink/bot/getuploadurl", req, token)
 }
 
-export async function uploadToCDN(uploadParam: string, encryptedData: Buffer): Promise<void> {
-  const res = await fetch(uploadParam, {
-    method: "PUT",
+export interface CDNUploadResult {
+  encryptQueryParam: string
+}
+
+export async function uploadToCDN(
+  baseUrl: string,
+  fileKey: string,
+  uploadParam: string,
+  encryptedData: Buffer,
+): Promise<CDNUploadResult> {
+  // 根据 wechatbot SDK，正确的 CDN 上传 URL 格式是：
+  // ${CDN_BASE_URL}/upload?encrypted_query_param=${uploadParam}&filekey=${fileKey}
+  const uploadUrl = `https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=${encodeURIComponent(uploadParam)}&filekey=${encodeURIComponent(fileKey)}`
+  
+  const res = await fetch(uploadUrl, {
+    method: "POST",
     body: encryptedData,
     headers: {
       "Content-Type": "application/octet-stream",
     },
   })
+  
   if (!res.ok) {
-    throw new Error(`CDN upload failed: ${res.status}`)
+    const errorMsg = res.headers.get("x-error-message") || `HTTP ${res.status}`
+    throw new Error(`CDN upload failed: ${errorMsg}`)
   }
+  
+  // 从响应头中获取 x-encrypted-param，这是发送消息时需要的 encrypt_query_param
+  const encryptQueryParam = res.headers.get("x-encrypted-param")
+  if (!encryptQueryParam) {
+    throw new Error("CDN upload succeeded but x-encrypted-param header is missing")
+  }
+  
+  return { encryptQueryParam }
+}
+
+export async function getTypingTicket(
+  baseUrl: string,
+  token: string,
+  toUserId: string,
+): Promise<GetConfigResponse> {
+  const req: GetConfigRequest = {
+    type: 1,
+    to_user_id: toUserId,
+    base_info: { channel_version: CHANNEL_VERSION },
+  }
+  return apiPost<GetConfigResponse>(baseUrl, "ilink/bot/getconfig", req, token)
+}
+
+export async function sendTyping(
+  baseUrl: string,
+  token: string,
+  ilinkUserId: string,
+  typingTicket: string,
+  status: 1 | 2,
+): Promise<SendTypingResponse> {
+  const req: SendTypingRequest = {
+    ilink_user_id: ilinkUserId,
+    typing_ticket: typingTicket,
+    status,
+    base_info: { channel_version: CHANNEL_VERSION },
+  }
+  return apiPost<SendTypingResponse>(baseUrl, "ilink/bot/sendtyping", req, token)
 }
 
 export { ILINK_BASE_URL, CHANNEL_VERSION }

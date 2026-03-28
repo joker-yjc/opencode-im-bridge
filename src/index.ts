@@ -328,12 +328,15 @@ async function main(): Promise<void> {
    * Dispatch a single SSE event to all matching listeners.
    */
   function dispatchSseEvent(event: unknown): void {
-    const props = (event as Record<string, unknown>)?.properties as Record<string, unknown> | undefined
-    const eventType = (event as Record<string, unknown>)?.type as string | undefined
+    const eventObj = event as Record<string, unknown>
+    const props = eventObj?.properties as Record<string, unknown> | undefined
+    const eventType = eventObj?.type as string | undefined
     const sessionID = props?.sessionID ?? (props?.part && typeof props.part === "object" ? (props.part as Record<string, unknown>).sessionID : undefined)
+    
     if (eventType) {
       logger.debug(`SSE: ${eventType} session=${sessionID ?? "n/a"}`)
     }
+    
     if (sessionID && typeof sessionID === "string") {
       const listeners = eventListeners.get(sessionID)
       if (listeners) {
@@ -378,7 +381,6 @@ async function main(): Promise<void> {
         delay = Math.min(delay * 2, 30_000)
       }
     }
-    logger.info("SSE reconnect loop stopped (shutdown)")
   }
 
   // ═══════════════════════════════════════════
@@ -488,14 +490,14 @@ async function main(): Promise<void> {
 
   const sendTaskDelivery: (delivery: TaskDelivery) => Promise<void> = async (delivery) => {
     logger.info(`[sendTaskDelivery] Sending task result to channel=${delivery.channelId}, chatId=${delivery.chatId}, status=${delivery.status}`)
-    
+
     const statusEmoji = delivery.status === "success" ? "✅" : "❌"
-    const messageContent = delivery.status === "success" 
+    const messageContent = delivery.status === "success"
       ? `**任务执行成功**\n\n**Session:** ${delivery.sessionId || "N/A"}\n\n**执行结果:**\n${delivery.messageText}`
       : `**任务执行失败**\n\n**Session:** ${delivery.sessionId || "N/A"}\n\n**错误信息:**\n${delivery.messageText}`
-    
+
     const fullMessage = `🕒 **${delivery.taskName}** (${delivery.scheduleSummary})\n\n${messageContent}`
-    
+
     const plugin = channelManager?.getChannel(delivery.channelId as ChannelId)
     if (plugin?.outbound) {
       logger.info(`[sendTaskDelivery] Using plugin outbound for ${delivery.channelId}`)
@@ -515,14 +517,18 @@ async function main(): Promise<void> {
       logger.error(`[sendTaskDelivery] No delivery method available for channel ${delivery.channelId}`)
     }
 
+    logger.info(`[sendTaskDelivery] Checking file send: status=${delivery.status}, outboundMedia=${!!outboundMedia}`)
     if (delivery.status === "success" && outboundMedia) {
       const adapter = channelManager?.getChannel(delivery.channelId as ChannelId)?.outbound
+      logger.info(`[sendTaskDelivery] Calling sendDetectedFiles with adapter=${!!adapter}`)
       try {
         await outboundMedia.sendDetectedFiles({ address: delivery.chatId }, delivery.messageText, adapter)
         logger.info(`[sendTaskDelivery] Files sent successfully`)
       } catch (err) {
         logger.warn(`[sendTaskDelivery] sendDetectedFiles failed: ${err}`)
       }
+    } else {
+      logger.info(`[sendTaskDelivery] Skipping file send: status=${delivery.status}, hasOutboundMedia=${!!outboundMedia}`)
     }
   }
 

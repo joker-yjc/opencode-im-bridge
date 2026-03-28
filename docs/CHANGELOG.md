@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## Unreleased
+
+### Bug Fixes
+
+- **WeChat Media Messages Reception**: Fixed image, file, voice, and video message reception in WeChat plugin by correcting message type mapping in gateway (was hardcoded to "text") and enhancing media information extraction in normalizeInbound method
+- **WeChat File/Video Sending**: Fixed sendFileMessage and sendVideoMessage functions to correctly pass upload_param as encrypt_query_param parameter (was empty string), enabling file and video sending to work properly
+- **WeChat MessageHandler Support**: Added wechatSupportedTypes to message-handler.ts, enabling proper handling of image, file, voice, and video message types for WeChat channel (was being rejected as unsupported)
+
+### Features
+
+- **WeChat Typing Indicator**: Added sendTyping method to WeChat plugin, enabling "user is typing" status display in WeChat chats
+
+### Refactor
+
+- **WeChat Plugin Rewritten**: Complete rewrite using official `@wechatbot/wechatbot` SDK. This replaces the previous manual iLink API implementation with the official SDK, fixing numerous issues with image/file sending, CDN upload, and typing status. The new implementation is more stable and better maintained.
+
+### Known Issues
+
+- **WeChat QR Code Login**: If QR code scan fails during first login, use the QR Code URL printed in the console to complete the binding directly
+
+### Bug Fixes
+
+- **WeChat Media Send Fix**: Fixed incorrect use of upload_param as encrypt_query_param. Now correctly extracts x-encrypted-param from CDN response headers after upload, which is the proper encrypt_query_param value
+- **WeChat CDN Upload**: Fixed CDN upload URL format to match official SDK: `https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=...&filekey=...`
+- **WeChat Typing API**: Fixed sendTyping request format - added required ilink_user_id parameter
+- **WeChat CDN filekey Mismatch**: Fixed filekey mismatch error by using the same random filekey for both getUploadURL and uploadToCDN calls
+
 ## 0.42.0 (2026-03-26)
 
 ### Refactor

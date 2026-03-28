@@ -219,6 +219,12 @@ export interface ChannelOutboundAdapter {
    * @param filePath Absolute path to the video file (already validated and within allowlist)
    */
   sendVideo?(target: OutboundTarget, filePath: string): Promise<void>;
+
+  /**
+   * Optional: Send typing indicator to a target (shows "user is typing" status)
+   * @param target Destination specification
+   */
+  sendTyping?(target: OutboundTarget): Promise<void>;
 }
 
 /**

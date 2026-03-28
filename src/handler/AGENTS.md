@@ -24,7 +24,7 @@ Detects file paths in agent response text using regex, then uploads matching fil
 Security model:
 - Paths are checked against an allowlist of permitted directories **before** any filesystem access (string prefix check avoids unnecessary FS calls)
 - `fs.realpath()` resolves symlinks before the final allowlist check, preventing TOCTOU path traversal attacks
-- Hard limit: `MAX_UPLOAD_BYTES = 20 * 1024 * 1024` (20 MB). Files over this limit are logged with a warning and skipped.
+- Hard limit: `MAX_UPLOAD_BYTES = 100 * 1024 * 1024` (100 MB, matches WeChat's limit). Files over this limit are logged with a warning and skipped.
 
 Upload routing: `.png`/`.jpg`/`.jpeg`/`.gif`/`.webp` go via `uploadImage`; everything else goes via `uploadFile`.
 

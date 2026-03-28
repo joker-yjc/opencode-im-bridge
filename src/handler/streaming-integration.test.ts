@@ -348,6 +348,7 @@ describe("createStreamingBridge", () => {
   it("sends permission requests as interactive cards via plugin outbound", async () => {
     const sendCard = vi.fn().mockResolvedValue(undefined)
     const sendText = vi.fn().mockResolvedValue(undefined)
+    const delayedSendMessage = () => new Promise<string>((resolve) => setTimeout(() => resolve('{"parts":[{"type":"text","text":"mock response"}]}'), 100))
     const deps = makeDeps({
       channelManager: {
         getChannel: vi.fn().mockReturnValue({
@@ -366,7 +367,7 @@ describe("createStreamingBridge", () => {
       "ses-1",
       eventListeners,
       eventProcessor,
-      mockSendMessage,
+      delayedSendMessage,
       onComplete,
       "msg_original",
       null,
@@ -715,6 +716,7 @@ describe("createStreamingBridge", () => {
       }),
       replyMessage: vi.fn().mockResolvedValue({ code: 0 }),
     }
+    const delayedSendMessage = () => new Promise<string>((resolve) => setTimeout(() => resolve('{"parts":[{"type":"text","text":"mock response"}]}'), 100))
     const deps = makeDeps({ feishuClient: mockFeishu })
     const bridge = createStreamingBridge(deps)
 
@@ -724,7 +726,7 @@ describe("createStreamingBridge", () => {
           "ses-1",
           eventListeners,
           eventProcessor,
-          mockSendMessage,
+          delayedSendMessage,
           onComplete,
           "msg_original",
           null,
@@ -844,6 +846,7 @@ describe("createStreamingBridge", () => {
       }),
       replyMessage: vi.fn().mockResolvedValue({ code: 0 }),
     }
+    const delayedSendMessage = () => new Promise<string>((resolve) => setTimeout(() => resolve('{"parts":[{"type":"text","text":"mock response"}]}'), 100))
     const deps = makeDeps({ feishuClient: mockFeishu })
     const bridge = createStreamingBridge(deps)
 
@@ -853,7 +856,7 @@ describe("createStreamingBridge", () => {
           "ses-1",
           eventListeners,
           eventProcessor,
-          mockSendMessage,
+          delayedSendMessage,
           onComplete,
           "msg_original",
           null,
@@ -895,6 +898,7 @@ describe("createStreamingBridge", () => {
       replyMessage: vi.fn().mockResolvedValue({ code: 0 }),
       deleteReaction: vi.fn().mockResolvedValue({ code: 0 }),
     }
+    const delayedSendMessage = () => new Promise<string>((resolve) => setTimeout(() => resolve('{"parts":[{"type":"text","text":"mock response"}]}'), 100))
     const deps = makeDeps({ feishuClient: mockFeishu })
     const bridge = createStreamingBridge(deps)
 
@@ -904,7 +908,7 @@ describe("createStreamingBridge", () => {
       "ses-1",
       eventListeners,
       eventProcessor,
-      mockSendMessage,
+      delayedSendMessage,
       onComplete,
       "msg_original",
       "reaction_123",
@@ -953,6 +957,7 @@ describe("createStreamingBridge", () => {
       replyMessage: vi.fn().mockResolvedValue({ code: 0 }),
       deleteReaction: vi.fn().mockResolvedValue({ code: 0 }),
     }
+    const delayedSendMessage = () => new Promise<string>((resolve) => setTimeout(() => resolve('{"parts":[{"type":"text","text":"mock response"}]}'), 100))
     const deps = makeDeps({ feishuClient: mockFeishu })
     const bridge = createStreamingBridge(deps)
 
@@ -962,7 +967,7 @@ describe("createStreamingBridge", () => {
       "ses-1",
       eventListeners,
       eventProcessor,
-      mockSendMessage,
+      delayedSendMessage,
       onComplete,
       "msg_original",
       "reaction_123",

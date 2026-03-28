@@ -1,6 +1,6 @@
-import crypto from "node:crypto"
-import { basename } from "node:path"
 import { readFile } from "node:fs/promises"
+import { basename } from "node:path"
+import { WeChatBot, type IncomingMessage } from "@wechatbot/wechatbot"
 import { BaseChannelPlugin } from "../base-plugin.js"
 import type {
   ChannelId,
@@ -19,11 +19,6 @@ import type {
 } from "../types.js"
 import type { AppConfig } from "../../utils/config.js"
 import type { Logger } from "../../utils/logger.js"
-import { CHANNEL_VERSION } from "./types.js"
-import type { WechatConfig, WechatMessage, WechatSession } from "./types.js"
-import { getUpdates, sendMessage, sendFileMessage, sendImageMessage, sendVideoMessage, getUploadURL, uploadToCDN, generateAESKey, encryptAES128ECB, md5 } from "./client.js"
-import { ensureSession } from "./auth.js"
-import { MAX_CONSECUTIVE_FAILURES, RETRY_DELAY_MS, BACKOFF_DELAY_MS, CDNMediaTypeFile, CDNMediaTypeImage, CDNMediaTypeVideo } from "./types.js"
 
 export interface WechatPluginDeps {
   appConfig: AppConfig
@@ -36,30 +31,33 @@ export class WechatPlugin extends BaseChannelPlugin {
   override meta: ChannelMeta = {
     id: "wechat" as ChannelId,
     label: "WeChat",
-    description: "微信 iLink Bot API channel integration",
+    description: "微信 iLink Bot API channel integration (via @wechatbot/wechatbot)",
   }
 
   private readonly appConfig: AppConfig
   private readonly logger: Logger
-  private readonly wechatConfig: WechatConfig
-  private _session: WechatSession | null = null
+  private bot: WeChatBot | null = null
 
   override config: ChannelConfigAdapter
   override gateway: ChannelGatewayAdapter
   override messaging: ChannelMessagingAdapter
   override outbound: ChannelOutboundAdapter
   override streaming: ChannelStreamingAdapter
+  override threading: {
+    resolveThread: (inbound: NormalizedMessage) => ThreadKey
+    mapSession: (threadKey: ThreadKey, sessionId: string) => void
+    getSession: (threadKey: ThreadKey) => string | null
+  }
 
   private readonly _threadMap = new Map<ThreadKey, string>()
-  private readonly _contextTokenMap = new Map<string, string>()
 
   constructor(deps: WechatPluginDeps) {
     super()
     this.appConfig = deps.appConfig
     this.logger = deps.logger
-    this.wechatConfig = deps.appConfig.wechat ?? { enabled: true }
 
-    if (!this.wechatConfig.enabled) {
+    const wechatConfig = deps.appConfig.wechat
+    if (!wechatConfig?.enabled) {
       throw new Error("WeChat config is missing or disabled but WechatPlugin was instantiated")
     }
 
@@ -70,120 +68,103 @@ export class WechatPlugin extends BaseChannelPlugin {
 
     this.gateway = {
       startAccount: async (_accountId: string, signal: AbortSignal): Promise<void> => {
-        const sessionFile = this.wechatConfig.sessionFile
-        const session = await ensureSession(sessionFile)
-        this._session = session
+        const wechatConfig = this.appConfig.wechat!
+        
+        this.bot = new WeChatBot({
+          storage: "file",
+          storageDir: wechatConfig.sessionFile 
+            ? this.getDirName(wechatConfig.sessionFile)
+            : undefined,
+          logLevel: "info",
+          loginCallbacks: {
+            onQrUrl: (url: string) => {
+              this.logger.info(`[WechatPlugin] QR Code URL: ${url}`)
+            },
+            onScanned: () => {
+              this.logger.info(`[WechatPlugin] QR Code scanned, please confirm on device`)
+            },
+            onExpired: () => {
+              this.logger.warn(`[WechatPlugin] QR Code expired, please try again`)
+            },
+          },
+        })
 
-        this.logger.info(`[WechatPlugin] Connected as Bot: ${session.accountId}`)
-
-        let buf = ""
-        let consecutiveFailures = 0
-
-        const poll = async () => {
-          while (!signal.aborted) {
-            try {
-              const resp = await getUpdates(session.baseUrl, session.token, buf)
-
-              const isError =
-                (resp.ret !== undefined && resp.ret !== 0) ||
-                (resp.errcode !== undefined && resp.errcode !== 0)
-
-              if (isError) {
-                consecutiveFailures++
-                this.logger.warn(`[WechatPlugin] getUpdates error: ret=${resp.ret}, errcode=${resp.errcode}, errmsg=${resp.errmsg}`)
-
-                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                  this.logger.warn(`[WechatPlugin] ${MAX_CONSECUTIVE_FAILURES} consecutive failures, backing off...`)
-                  await new Promise((r) => setTimeout(r, BACKOFF_DELAY_MS))
-                  consecutiveFailures = 0
-                } else {
-                  await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
-                }
-                continue
-              }
-
-              consecutiveFailures = 0
-
-              if (resp.get_updates_buf) {
-                buf = resp.get_updates_buf
-              }
-
-              for (const msg of resp.msgs ?? []) {
-                if (msg.message_type !== 1) continue
-
-                this.logger.info(`[WechatPlugin] Received message from ${msg.from_user_id}`)
-
-                if (msg.context_token) {
-                  this._contextTokenMap.set(msg.from_user_id, msg.context_token)
-                }
-
-                if (deps.onMessage) {
-                  const syntheticEvent = {
-                    event_id: msg.client_id || crypto.randomUUID(),
-                    event_type: "message",
-                    chat_id: msg.from_user_id,
-                    chat_type: "p2p",
-                    message_id: msg.client_id || crypto.randomUUID(),
-                    sender: {
-                      sender_id: { open_id: msg.from_user_id },
-                      sender_type: "user",
-                      tenant_key: "wechat",
-                    },
-                    message: {
-                      message_type: "text",
-                      content: JSON.stringify({
-                        text: this.extractText(msg),
-                        context_token: msg.context_token,
-                      }),
-                    },
-                    _channelId: "wechat",
-                    _rawMessage: msg,
-                  }
-                  await deps.onMessage(syntheticEvent)
-                }
-              }
-            } catch (err) {
-              consecutiveFailures++
-              this.logger.error(`[WechatPlugin] Poll error: ${err}`)
-
-              if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                this.logger.warn(`[WechatPlugin] ${MAX_CONSECUTIVE_FAILURES} consecutive failures, backing off...`)
-                await new Promise((r) => setTimeout(r, BACKOFF_DELAY_MS))
-                consecutiveFailures = 0
-              } else {
-                await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
-              }
-            }
-          }
-          this.logger.info("[WechatPlugin] Gateway polling stopped")
+        try {
+          await this.bot.login()
+          this.logger.info(`[WechatPlugin] Login successful`)
+        } catch (err) {
+          this.logger.error(`[WechatPlugin] Login failed: ${err}`)
+          throw err
         }
 
-        poll()
+        this.bot.onMessage(async (msg: IncomingMessage) => {
+          this.logger.info(`[WechatPlugin] Received message: userId=${msg.userId}, type=${msg.type}, text="${msg.text}"`)
+
+          if (deps.onMessage) {
+            const event = {
+              event_id: msg.raw.message_id?.toString() || crypto.randomUUID(),
+              event_type: "message",
+              chat_id: msg.userId,
+              chat_type: "p2p",
+              message_id: msg.raw.message_id?.toString() || crypto.randomUUID(),
+              sender: {
+                sender_id: { open_id: msg.userId },
+                sender_type: "user",
+                tenant_key: "wechat",
+              },
+              message: {
+                message_type: msg.type,
+                content: JSON.stringify({
+                  text: msg.text,
+                  context_token: msg._contextToken,
+                }),
+              },
+              _channelId: "wechat",
+              _rawMessage: msg,
+            }
+            this.logger.info(`[WechatPlugin] Calling onMessage handler...`)
+            try {
+              await deps.onMessage(event)
+              this.logger.info(`[WechatPlugin] onMessage handler completed`)
+            } catch (err) {
+              this.logger.error(`[WechatPlugin] onMessage handler error: ${err}`)
+            }
+          } else {
+            this.logger.warn(`[WechatPlugin] onMessage not configured`)
+          }
+        })
+
+        if (signal.aborted) {
+          this.logger.info("[WechatPlugin] Aborted before starting polling")
+          return
+        }
+
+        try {
+          await this.bot.start()
+          this.logger.info("[WechatPlugin] Message polling started")
+        } catch (err) {
+          this.logger.error(`[WechatPlugin] Failed to start polling: ${err}`)
+          throw err
+        }
+
+        signal.addEventListener("abort", () => {
+          this.logger.info("[WechatPlugin] Stopping message polling...")
+          this.bot?.stop()
+        })
       },
     }
 
     this.messaging = {
       normalizeInbound: (raw: any): NormalizedMessage => {
-        const ev = raw
-        const content = ev.message?.content ? JSON.parse(ev.message.content) : {}
-
-        // Determine message type from raw message items
-        const itemType = raw._rawMessage?.item_list?.[0]?.type ?? 1
-        const messageType: "text" | "image" | "voice" | "file" | "video" =
-          itemType === 2 ? "image" :
-          itemType === 3 ? "voice" :
-          itemType === 4 ? "file" :
-          itemType === 5 ? "video" :
-          "text"
-
+        const msg = raw._rawMessage as IncomingMessage
         return {
-          messageId: ev.message_id,
-          senderId: ev.sender?.sender_id?.open_id || ev.chat_id,
-          text: content.text || "",
-          chatId: ev.chat_id,
-          threadId: ev.chat_id,
-          timestamp: Date.now(),
-          messageType,
+          messageId: msg.raw.message_id?.toString() || "",
+          senderId: msg.userId,
+          text: msg.text,
+          chatId: msg.userId,
+          threadId: msg.userId,
+          timestamp: msg.timestamp.getTime(),
+          messageType: msg.type,
         }
       },
 
@@ -194,224 +175,103 @@ export class WechatPlugin extends BaseChannelPlugin {
 
     this.outbound = {
       sendText: async (target: OutboundTarget, text: string): Promise<void> => {
-        if (!this._session) {
-          this.logger.error("[WechatPlugin] Session not initialized - cannot send message")
+        if (!this.bot) {
+          this.logger.error("[WechatPlugin] Bot not initialized")
           return
         }
 
-        const address = target.address
-        const contextToken = this._contextTokenMap.get(address)
-
-        if (!contextToken) {
-          this.logger.warn(`[WechatPlugin] No context_token found for user ${address}, message may not be delivered correctly`)
+        try {
+          await this.bot.send(target.address, text)
+        } catch (err) {
+          this.logger.error(`[WechatPlugin] Failed to send text: ${err}`)
+          throw err
         }
-
-        await sendMessage(
-          this._session.baseUrl,
-          this._session.token,
-          address,
-          text,
-          contextToken || "",
-        )
       },
 
       sendImage: async (target: OutboundTarget, filePath: string): Promise<void> => {
-        if (!this._session) {
-          this.logger.error("[WechatPlugin] Session not initialized - cannot send image")
+        if (!this.bot) {
+          this.logger.error("[WechatPlugin] Bot not initialized")
           return
         }
 
-        this.logger.info(`[WechatPlugin] Sending image: ${filePath}`)
-
-        const fileData = await readFile(filePath)
-        const aesKey = generateAESKey()
-        const encrypted = encryptAES128ECB(fileData, aesKey)
-        const fileMd5 = md5(fileData)
-
-        const uploadResp = await getUploadURL(this._session.baseUrl, this._session.token, {
-          filekey: fileMd5,
-          media_type: CDNMediaTypeImage,
-          to_user_id: target.address,
-          rawsize: fileData.length,
-          rawfilemd5: fileMd5,
-          filesize: encrypted.length,
-          no_need_thumb: true,
-          aeskey: aesKey,
-          base_info: { channel_version: CHANNEL_VERSION },
-        })
-
-        if (!uploadResp.upload_param) {
-          throw new Error("Failed to get upload URL")
+        try {
+          const buffer = await readFile(filePath)
+          await this.bot.send(target.address, { image: buffer })
+          this.logger.info(`[WechatPlugin] Image sent to ${target.address}: ${filePath}`)
+        } catch (err) {
+          this.logger.error(`[WechatPlugin] Failed to send image: ${err}`)
+          throw err
         }
-
-        await uploadToCDN(uploadResp.upload_param, encrypted)
-
-        const contextToken = this._contextTokenMap.get(target.address) || ""
-        await sendImageMessage(
-          this._session.baseUrl,
-          this._session.token,
-          target.address,
-          `wcb-${crypto.randomUUID()}`,
-          contextToken,
-          aesKey,
-          fileMd5,
-          encrypted,
-          fileData.length,
-        )
-
-        this.logger.info(`[WechatPlugin] Image sent: ${filePath}`)
       },
 
       sendFile: async (target: OutboundTarget, filePath: string): Promise<void> => {
-        if (!this._session) {
-          this.logger.error("[WechatPlugin] Session not initialized - cannot send file")
+        if (!this.bot) {
+          this.logger.error("[WechatPlugin] Bot not initialized")
           return
         }
 
-        this.logger.info(`[WechatPlugin] Sending file: ${filePath}`)
-
-        const fileData = await readFile(filePath)
-        const fileName = basename(filePath)
-
-        const aesKey = generateAESKey()
-        const encrypted = encryptAES128ECB(fileData, aesKey)
-        const fileMd5 = md5(fileData)
-
-        const uploadResp = await getUploadURL(this._session.baseUrl, this._session.token, {
-          filekey: fileMd5,
-          media_type: CDNMediaTypeFile,
-          to_user_id: target.address,
-          rawsize: fileData.length,
-          rawfilemd5: fileMd5,
-          filesize: encrypted.length,
-          no_need_thumb: true,
-          aeskey: aesKey,
-          base_info: { channel_version: CHANNEL_VERSION },
-        })
-
-        if (!uploadResp.upload_param) {
-          throw new Error("Failed to get upload URL")
+        try {
+          const buffer = await readFile(filePath)
+          const fileName = basename(filePath)
+          await this.bot.send(target.address, { file: buffer, fileName })
+          this.logger.info(`[WechatPlugin] File sent to ${target.address}: ${filePath}`)
+        } catch (err) {
+          this.logger.error(`[WechatPlugin] Failed to send file: ${err}`)
+          throw err
         }
-
-        await uploadToCDN(uploadResp.upload_param, encrypted)
-
-        const contextToken = this._contextTokenMap.get(target.address) || ""
-        await sendFileMessage(
-          this._session.baseUrl,
-          this._session.token,
-          target.address,
-          `wcb-${crypto.randomUUID()}`,
-          contextToken,
-          aesKey,
-          fileMd5,
-          encrypted,
-          fileData.length,
-          fileName,
-        )
-
-        this.logger.info(`[WechatPlugin] File sent: ${filePath}`)
       },
 
       sendAudio: async (target: OutboundTarget, filePath: string): Promise<void> => {
-        if (!this._session) {
-          this.logger.error("[WechatPlugin] Session not initialized - cannot send audio")
+        if (!this.bot) {
+          this.logger.error("[WechatPlugin] Bot not initialized")
           return
         }
 
-        this.logger.info(`[WechatPlugin] Sending audio: ${filePath}`)
-
-        const fileData = await readFile(filePath)
-        const aesKey = generateAESKey()
-        const encrypted = encryptAES128ECB(fileData, aesKey)
-        const fileMd5 = md5(fileData)
-
-        const uploadResp = await getUploadURL(this._session.baseUrl, this._session.token, {
-          filekey: fileMd5,
-          media_type: CDNMediaTypeFile,
-          to_user_id: target.address,
-          rawsize: fileData.length,
-          rawfilemd5: fileMd5,
-          filesize: encrypted.length,
-          no_need_thumb: true,
-          aeskey: aesKey,
-          base_info: { channel_version: CHANNEL_VERSION },
-        })
-
-        if (!uploadResp.upload_param) {
-          throw new Error("Failed to get upload URL")
+        try {
+          const buffer = await readFile(filePath)
+          const fileName = basename(filePath)
+          await this.bot.send(target.address, { file: buffer, fileName })
+          this.logger.info(`[WechatPlugin] Audio sent to ${target.address}: ${filePath}`)
+        } catch (err) {
+          this.logger.error(`[WechatPlugin] Failed to send audio: ${err}`)
+          throw err
         }
-
-        await uploadToCDN(uploadResp.upload_param, encrypted)
-
-        const contextToken = this._contextTokenMap.get(target.address) || ""
-        await sendFileMessage(
-          this._session!.baseUrl,
-          this._session!.token,
-          target.address,
-          `wcb-${crypto.randomUUID()}`,
-          contextToken,
-          aesKey,
-          fileMd5,
-          encrypted,
-          fileData.length,
-          basename(filePath),
-        )
-
-        this.logger.info(`[WechatPlugin] Audio sent: ${filePath}`)
       },
 
       sendVideo: async (target: OutboundTarget, filePath: string): Promise<void> => {
-        if (!this._session) {
-          this.logger.error("[WechatPlugin] Session not initialized - cannot send video")
+        if (!this.bot) {
+          this.logger.error("[WechatPlugin] Bot not initialized")
           return
         }
 
-        this.logger.info(`[WechatPlugin] Sending video: ${filePath}`)
+        try {
+          const buffer = await readFile(filePath)
+          await this.bot.send(target.address, { video: buffer })
+          this.logger.info(`[WechatPlugin] Video sent to ${target.address}: ${filePath}`)
+        } catch (err) {
+          this.logger.error(`[WechatPlugin] Failed to send video: ${err}`)
+          throw err
+        }
+      },
 
-        const fileData = await readFile(filePath)
-        const aesKey = generateAESKey()
-        const encrypted = encryptAES128ECB(fileData, aesKey)
-        const fileMd5 = md5(fileData)
-
-        const uploadResp = await getUploadURL(this._session.baseUrl, this._session.token, {
-          filekey: fileMd5,
-          media_type: CDNMediaTypeVideo,
-          to_user_id: target.address,
-          rawsize: fileData.length,
-          rawfilemd5: fileMd5,
-          filesize: encrypted.length,
-          no_need_thumb: true,
-          aeskey: aesKey,
-          base_info: { channel_version: CHANNEL_VERSION },
-        })
-
-        if (!uploadResp.upload_param) {
-          throw new Error("Failed to get upload URL")
+      sendTyping: async (target: OutboundTarget): Promise<void> => {
+        if (!this.bot) {
+          this.logger.error("[WechatPlugin] Bot not initialized")
+          return
         }
 
-        await uploadToCDN(uploadResp.upload_param, encrypted)
-
-        const contextToken = this._contextTokenMap.get(target.address) || ""
-        await sendVideoMessage(
-          this._session!.baseUrl,
-          this._session!.token,
-          target.address,
-          `wcb-${crypto.randomUUID()}`,
-          contextToken,
-          aesKey,
-          fileMd5,
-          encrypted,
-          fileData.length,
-        )
-
-        this.logger.info(`[WechatPlugin] Video sent: ${filePath}`)
+        try {
+          await this.bot.sendTyping(target.address)
+          this.logger.info(`[WechatPlugin] Typing status sent to ${target.address}`)
+        } catch (err) {
+          this.logger.error(`[WechatPlugin] sendTyping failed: ${err}`)
+        }
       },
     }
 
     this.streaming = {
       createStreamingSession: (target: StreamTarget): StreamingSession => {
         const sessionId = `wechat_stream_${Date.now()}`
-
         const session: StreamingSession = {
           sessionId,
           target,
@@ -436,24 +296,9 @@ export class WechatPlugin extends BaseChannelPlugin {
     }
   }
 
-  private extractText(msg: WechatMessage): string {
-    for (const item of msg.item_list ?? []) {
-      if (item.type === 1 && item.text_item?.text) {
-        return item.text_item.text
-      }
-      if (item.type === 3 && item.voice_item?.text) {
-        return `[语音] ${item.voice_item.text}`
-      }
-      if (item.type === 2) {
-        return "[图片]"
-      }
-      if (item.type === 4) {
-        return `[文件] ${item.file_item?.file_name ?? ""}`
-      }
-      if (item.type === 5) {
-        return "[视频]"
-      }
-    }
-    return "[空消息]"
+  private getDirName(filePath: string): string {
+    const parts = filePath.replace(/\\/g, "/").split("/")
+    parts.pop()
+    return parts.join("/") || "."
   }
 }

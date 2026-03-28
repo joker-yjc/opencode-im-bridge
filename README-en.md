@@ -13,7 +13,7 @@
 ## Features
 
 - **Real-time bridging** — Messages sent in Feishu arrive in your opencode TUI instantly. Agent replies stream back as live-updating cards with **Markdown rendering support** (headings, lists, code blocks, etc.).
-- **Multi-channel support** — Now supports bridging QQ, Telegram, Discord, and WeChat messages via official platform APIs. WeChat uses Tencent's official iLink Bot API with QR code login.
+- **Multi-channel support** — Now supports bridging QQ, Telegram, Discord, and WeChat messages via official platform APIs. WeChat uses Tencent's official `@wechatbot/wechatbot` SDK with QR code login.
 - **Interactive cards** — Agent questions and permission requests appear as clickable Feishu cards. Answer or approve directly from the chat — no need to switch to the TUI. (Currently supported primarily for Feishu)
 - **WebSocket connection** — Uses Feishu's long-lived WebSocket mode. No webhook polling, no public IP required.
 - **SSE streaming** — Consumes the opencode SSE event stream and debounces card updates to stay within rate limits.
@@ -32,9 +32,9 @@
 | `text` | ✅ | ✅ | ✅ | ✅ | ✅ | Plain text messages |
 | `post` | ✅ | ✅ | ❌ | ❌ | ❌ | Rich text / multi-paragraph |
 | `image` | ✅ | ✅ | ✅ | ✅ | ✅ | Photos and screenshots |
-| `file` | ✅ | ✅ | ✅ | ✅ | ⏳ | Documents, code files |
-| `audio` | ✅ | ✅ | ✅ | ✅ | ⏳ | Voice messages with transcription |
-| `video` | ✅ | ✅ | ✅ | ✅ | ⏳ | Video messages |
+| `file` | ✅ | ✅ | ✅ | ✅ | ✅ | Documents, code files |
+| `audio` | ✅ | ✅ | ✅ | ✅ | ✅ | Voice messages with transcription |
+| `video` | ✅ | ✅ | ✅ | ✅ | ✅ | Video messages |
 | `sticker` | ❌ | ❌ | ❌ | ❌ | ❌ | Not supported |
 
 > ⏳ = In development
@@ -49,7 +49,7 @@ Downloaded files are saved to `${OPENCODE_CWD}/.opencode-lark/attachments/` (fal
 | QQ | WebSocket | App ID + Secret | ✅ | ✅ | ❌ |
 | Telegram | HTTP Bot API | Bot Token | ✅ | ✅ | ❌ |
 | Discord | HTTP Bot API | Bot Token | ✅ | ✅ | ❌ |
-| WeChat | HTTP Long Polling | QR Code | ✅ | ⏳ | ⏳ |
+| WeChat | HTTP Long Polling | QR Code | ✅ | ✅ | ❌ |
 
 #### Slash Commands
 
@@ -226,7 +226,7 @@ Supports `${ENV_VAR}` interpolation and JSONC comments. If no config file is fou
 
 ### WeChat Configuration
 
-WeChat uses Tencent's official **iLink Bot API**, with a different authentication flow:
+WeChat uses Tencent's official **`@wechatbot/wechatbot` SDK**, with a different authentication flow:
 
 **Enable WeChat:**
 ```bash
@@ -245,6 +245,8 @@ export WECHAT_ENABLED=true
 - HTTP long polling (35s timeout) for receiving messages
 - `context_token` for message correlation and replies
 - Supports text, images, voice (with transcription), files
+
+> **Note**: If the QR code scan fails, use the QR Code URL printed in the console to complete the binding directly.
 
 ---
 
