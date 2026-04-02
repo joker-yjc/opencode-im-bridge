@@ -5,6 +5,7 @@
 
 import * as fs from "node:fs"
 import * as path from "node:path"
+import * as os from "node:os"
 import * as readline from "node:readline/promises"
 import { createLogger } from "../utils/logger.js"
 import { listEnvFiles, ensureConfigDir, CONFIG_DIR } from "../utils/env-loader.js"
@@ -24,6 +25,13 @@ const CONFIG_SEARCH_PATHS = [
   path.resolve("opencode-feishu.jsonc"),
   path.resolve("opencode-feishu.json"),
 ]
+
+/**
+ * 获取微信凭证文件路径（由 @wechatbot/wechatbot SDK 写入）
+ */
+function getWechatCredentialPath(): string {
+  return path.join(os.homedir(), ".wechatbot", "credentials.json")
+}
 
 /**
  * Check whether interactive setup is needed.
@@ -309,6 +317,30 @@ export async function runSetupWizard(): Promise<void> {
     // WeChat uses QR code login, no credentials needed
     if (setupWechat) {
       process.stdout.write("\n" + dim("--- WeChat Configuration ---") + "\n")
+      
+      // 检查是否存在已有的凭证文件
+      const credentialPath = getWechatCredentialPath()
+      if (fs.existsSync(credentialPath)) {
+        process.stdout.write(dim("  检测到已有的微信登录凭证") + "\n")
+        const rlWechat = readline.createInterface({ input: process.stdin, output: process.stdout })
+        try {
+          const answer = await rlWechat.question("  是否删除现有凭证并重新扫码登录？[y/N]: ")
+          if (answer.trim().toLowerCase() === 'y' || answer.trim().toLowerCase() === 'yes') {
+            try {
+              fs.unlinkSync(credentialPath)
+              process.stdout.write(green("  ✓ 已删除现有凭证，下次启动将需要重新扫码登录") + "\n")
+            } catch (err) {
+              process.stdout.write(red("  ✗ 删除凭证失败: " + (err as Error).message) + "\n")
+              process.stdout.write(dim(`  请手动删除凭证文件: ${credentialPath}`) + "\n")
+            }
+          } else {
+            process.stdout.write(dim("  保留现有凭证") + "\n")
+          }
+        } finally {
+          rlWechat.close()
+        }
+      }
+      
       process.stdout.write(dim("  WeChat uses QR code login on first run.") + "\n")
       process.stdout.write(dim("  Enable WeChat by setting WECHAT_ENABLED=true") + "\n")
     }

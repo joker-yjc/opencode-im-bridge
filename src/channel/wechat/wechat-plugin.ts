@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { basename } from "node:path"
 import { WeChatBot, type IncomingMessage } from "@wechatbot/wechatbot"
+import QRCode from "qrcode"
 import { BaseChannelPlugin } from "../base-plugin.js"
 import type {
   ChannelId,
@@ -69,28 +70,54 @@ export class WechatPlugin extends BaseChannelPlugin {
     this.gateway = {
       startAccount: async (_accountId: string, signal: AbortSignal): Promise<void> => {
         const wechatConfig = this.appConfig.wechat!
-        
+
         this.bot = new WeChatBot({
           storage: "file",
-          storageDir: wechatConfig.sessionFile 
+          storageDir: wechatConfig.sessionFile
             ? this.getDirName(wechatConfig.sessionFile)
             : undefined,
           logLevel: "info",
-          loginCallbacks: {
-            onQrUrl: (url: string) => {
-              this.logger.info(`[WechatPlugin] QR Code URL: ${url}`)
-            },
-            onScanned: () => {
-              this.logger.info(`[WechatPlugin] QR Code scanned, please confirm on device`)
-            },
-            onExpired: () => {
-              this.logger.warn(`[WechatPlugin] QR Code expired, please try again`)
-            },
-          },
         })
 
         try {
-          await this.bot.login()
+          await this.bot.login({
+            callbacks: {
+              onQrUrl: async (url: string) => {
+                this.logger.info(`[WechatPlugin] QR Code URL: ${url}`)
+                console.log("\n" + "=".repeat(60))
+                console.log("  请使用微信扫描下方二维码登录")
+                console.log("  (二维码链接有效期5分钟)")
+                console.log("=".repeat(60))
+
+                // 生成ASCII二维码
+                try {
+                  const asciiQR = await QRCode.toString(url, {
+                    type: 'terminal',
+                    small: true,
+                    margin: 2,
+                    width: 40
+                  })
+                  console.log(asciiQR)
+                } catch (err) {
+                  // 如果ASCII生成失败，只显示链接
+                }
+
+                // 始终显示链接（终端二维码可能无法扫描）
+                console.log(`\n  📎 链接: ${url}\n`)
+                console.log("  💡 提示: 如果终端二维码无法扫描，请复制上方链接到微信")
+                console.log("          然后在微信中访问该链接进行登录\n")
+                console.log("=".repeat(60) + "\n")
+              },
+              onScanned: () => {
+                this.logger.info(`[WechatPlugin] QR Code scanned, please confirm on device`)
+                console.log("  ✓ 已扫描，请在微信中点击确认")
+              },
+              onExpired: () => {
+                this.logger.warn(`[WechatPlugin] QR Code expired, please try again`)
+                console.log("  ⚠ 二维码已过期，请重新运行")
+              },
+            },
+          })
           this.logger.info(`[WechatPlugin] Login successful`)
         } catch (err) {
           this.logger.error(`[WechatPlugin] Login failed: ${err}`)
@@ -277,7 +304,7 @@ export class WechatPlugin extends BaseChannelPlugin {
           target,
           pendingUpdates: [],
           createdAt: Date.now(),
-          flush: async () => {},
+          flush: async () => { },
         }
         return session
       },
